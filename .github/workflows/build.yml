@@ -33,7 +33,7 @@ jobs:
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ github.actor }
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push
@@ -41,4 +41,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/your-github-username/deepstream-custom:latest
+          tags: ghcr.io/pablo-codes/deepstream-custom:latest
