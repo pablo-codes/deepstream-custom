@@ -37,6 +37,20 @@ jobs:
       packages: write
 
     steps:
+      # ── Maximize Build Space ──
+      - name: Maximize Build Space
+        # The free GitHub runner only has 14GB of space. This step clears out
+        # unnecessary pre-installed software to give us the ~30GB needed for DeepStream.
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       # ── Checkout ──
       - name: Checkout repository
         uses: actions/checkout@v4
