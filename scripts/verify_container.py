@@ -4,6 +4,8 @@ Post-build verification script for the DeepStream custom container.
 Runs inside the built image to confirm all required packages are present
 and functional before the image is pushed to GHCR.
 
+Base image: nvcr.io/nvidia/deepstream:9.0-samples-multiarch
+
 Exit code 0 = all checks passed, non-zero = at least one check failed.
 """
 
@@ -91,31 +93,7 @@ else:
     failures.append("GStreamer not found")
 
 # ──────────────────────────────────────────────────────────
-# 4. Numpy version constraint (tritonserver requires numpy<2)
-# ──────────────────────────────────────────────────────────
-print()
-print("── Numpy Version Constraint ──")
-try:
-    import numpy as np
-    major = int(np.__version__.split(".")[0])
-    if major >= 2:
-        print(f"  {FAIL}  numpy {np.__version__} installed, but tritonserver requires numpy<2")
-        failures.append(f"numpy {np.__version__} >= 2 (tritonserver requires <2)")
-    else:
-        print(f"  {PASS}  numpy {np.__version__} is compatible with tritonserver (numpy<2)")
-except ImportError:
-    pass  # already caught in the package import checks above
-
-# ──────────────────────────────────────────────────────────
-# 5. Orphaned dist-info cleanup check
-# ──────────────────────────────────────────────────────────
-orphan_path = "/usr/local/lib/python3.12/dist-packages/numpy-1.26.4.dist-info"
-if os.path.exists(orphan_path):
-    print(f"  {FAIL}  Orphaned {orphan_path} still exists (causes pip warnings)")
-    failures.append("Orphaned numpy-1.26.4.dist-info not cleaned up")
-
-# ──────────────────────────────────────────────────────────
-# 6. pip metadata integrity check
+# 4. pip metadata integrity check
 # ──────────────────────────────────────────────────────────
 print()
 print("── pip Metadata Integrity ──")
@@ -123,9 +101,9 @@ pip_check = os.popen("pip3 check 2>&1").read().strip()
 if "No broken requirements found" in pip_check:
     print(f"  {PASS}  No broken requirements")
 else:
-    # Warn but don't fail — some base image conflicts may be benign
     for line in pip_check.splitlines()[:5]:
-        print(f"  ⚠️  WARN  {line}")
+        print(f"  {FAIL}  {line}")
+    failures.append("Broken pip requirements detected")
 
 # ──────────────────────────────────────────────────────────
 # Result
@@ -142,3 +120,4 @@ else:
     print("  ✅ ALL CHECKS PASSED — image is ready to push")
     print("=" * 60)
     sys.exit(0)
+

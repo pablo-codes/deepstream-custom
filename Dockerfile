@@ -1,24 +1,18 @@
-FROM nvcr.io/nvidia/deepstream:9.0-triton-multiarch
+FROM nvcr.io/nvidia/deepstream:9.0-samples-multiarch
 
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
 
 # 1. Update package lists
 # 2. Run the required DeepStream codecs script
-# 3. Install OpenCV, Numpy, and PyTorch (for PyServiceMaker tensor conversion)
+# 3. Install Python deps for PyServiceMaker frame extraction pipeline
 #
-# NOTE: pip installs are split into two stages so that a failure in the
-# large torch download does not silently prevent lightweight deps
-# (PyYAML, numpy, opencv) from being installed.
-#
-# NUMPY PIN: The base image ships tritonserver which requires numpy<2.
-# The base image also leaves behind a corrupt numpy-1.26.4.dist-info
-# directory — we remove it before installing to prevent pip warnings.
+# NOTE: pip installs are split so a failure in the large torch download
+# does not silently prevent lightweight deps from being installed.
 RUN apt-get update && \
     apt-get install -y python3-pip python3-dev && \
     /opt/nvidia/deepstream/deepstream/user_additional_install.sh && \
-    rm -rf /usr/local/lib/python3.12/dist-packages/numpy-1.26.4.dist-info && \
-    pip3 install PyYAML opencv-python-headless "numpy<2" --break-system-packages && \
+    pip3 install PyYAML opencv-python-headless numpy --break-system-packages && \
     pip3 install torch --break-system-packages && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*

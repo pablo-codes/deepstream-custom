@@ -2,6 +2,8 @@
 # Build, Verify, and Push the Custom DeepStream 9.0 Container
 # ──────────────────────────────────────────────────────────────
 #
+# Base image: nvcr.io/nvidia/deepstream:9.0-samples-multiarch
+#
 # This workflow:
 #   1. Builds the Docker image
 #   2. Runs a post-build verification step INSIDE the image
@@ -20,7 +22,7 @@ on:
     paths:
       - "Dockerfile"
       - "scripts/verify_container.py"
-      - ".github/workflows/build-deepstream.yml"
+      - ".github/workflows/build.yml"
   workflow_dispatch:  # manual trigger
 
 env:
@@ -103,7 +105,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Base | \`deepstream:9.0-samples-multiarch\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Image | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Tags | \`:latest\`, \`:$SHORT_SHA\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Verification | See **Verify installed packages** step |" >> $GITHUB_STEP_SUMMARY
+
