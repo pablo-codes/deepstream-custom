@@ -1,44 +1,109 @@
-name: Build DeepStream Image
+# ──────────────────────────────────────────────────────────────
+# Build, Verify, and Push the Custom DeepStream 9.0 Container
+# ──────────────────────────────────────────────────────────────
+#
+# This workflow:
+#   1. Builds the Docker image
+#   2. Runs a post-build verification step INSIDE the image
+#      to confirm all required packages (PyYAML, torch, numpy,
+#      opencv, GStreamer, DeepStream paths) are present
+#   3. Only pushes to GHCR if verification passes
+#
+# Trigger: push to main, or manual dispatch
+# ──────────────────────────────────────────────────────────────
+
+name: Build & Verify DeepStream Container
 
 on:
   push:
-    branches: ["main"]
-  workflow_dispatch:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "scripts/verify_container.py"
+      - ".github/workflows/build-deepstream.yml"
+  workflow_dispatch:  # manual trigger
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/deepstream-custom
 
 jobs:
-  build:
+  build-and-verify:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Maximize Build Space
-        # The free GitHub runner only has 14GB of space. This step clears out
-        # unnecessary pre-installed software to give us the ~30GB needed for DeepStream.
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
+      # ── Checkout ──
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      # ── Docker Buildx (required for multi-stage builds) ──
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+      # ── Log in to GHCR ──
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and Push
-        uses: docker/build-push-action@v4
+      # ── Build the image (load locally, don't push yet) ──
+      - name: Build container image
+        uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          tags: ghcr.io/pablo-codes/deepstream-custom:latest
+          file: ./Dockerfile
+          push: false          # DO NOT push yet
+          load: true           # Load into local Docker daemon
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── POST-BUILD VERIFICATION ──
+      # This is the gate: if any required package is missing,
+      # the verification script exits non-zero and the workflow fails.
+      # The image is never pushed.
+      - name: Verify installed packages
+        run: |
+          echo "Running post-build verification inside the container..."
+          docker run --rm \
+            -v ${{ github.workspace }}/scripts:/mnt/scripts:ro \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify \
+            python3 /mnt/scripts/verify_container.py
+
+      # ── Push to GHCR (only if verification passed) ──
+      - name: Tag and push verified image
+        run: |
+          # Tag with :latest and with the short SHA for traceability
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+
+          docker tag \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+          docker tag \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$SHORT_SHA
+
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$SHORT_SHA
+
+          echo "✅ Pushed verified image as :latest and :$SHORT_SHA"
+
+      # ── Summary ──
+      - name: Post summary
+        if: always()
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "### 🐳 DeepStream Container Build" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tags | \`:latest\`, \`:$SHORT_SHA\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Verification | See **Verify installed packages** step |" >> $GITHUB_STEP_SUMMARY
