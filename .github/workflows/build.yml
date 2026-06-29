@@ -14,14 +14,78 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/deepstream-custom
 
 jobs:
-  build-and-verify:
+  # ──────────────────────────────────────────────────────────────
+  # SERVER 1: Build, Verify, and Push the Docker Image
+  # ──────────────────────────────────────────────────────────────
+  # build-docker:
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: read
+  #     packages: write
+
+  #   steps:
+  #     - name: Maximize Build Space
+  #       uses: jlumbroso/free-disk-space@main
+  #       with:
+  #         tool-cache: true
+  #         android: true
+  #         dotnet: true
+  #         haskell: true
+  #         large-packages: true
+  #         docker-images: true
+  #         swap-storage: true
+
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+
+  #     - name: Log in to GitHub Container Registry
+  #       uses: docker/login-action@v3
+  #       with:
+  #         registry: ${{ env.REGISTRY }}
+  #         username: ${{ github.actor }}
+  #         password: ${{ secrets.GITHUB_TOKEN }}
+
+  #     - name: Build local sandbox image
+  #       uses: docker/build-push-action@v6
+  #       with:
+  #         context: .
+  #         file: ./Dockerfile
+  #         push: false
+  #         load: true
+  #         tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify
+  #         cache-from: type=gha
+  #         cache-to: type=gha,mode=max
+
+  #     - name: Verify installed packages
+  #       run: |
+  #         docker run --rm \
+  #           -v ${{ github.workspace }}/scripts:/mnt/scripts:ro \
+  #           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify \
+  #           python3 /mnt/scripts/verify_container.py
+
+  #     - name: Tag and push verified image
+  #       run: |
+  #         SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+  #         docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+  #         docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$SHORT_SHA
+
+  #         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+  #         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$SHORT_SHA
+  #         echo "✅ Docker image pushed successfully. Server 1 task complete."
+
+  # ──────────────────────────────────────────────────────────────
+  # SERVER 2: Build and Push Apptainer SIF (Runs on a FRESH disk)
+  # ──────────────────────────────────────────────────────────────
+  build-sif:
     runs-on: ubuntu-latest
+    # needs: build-docker # This forces Server 2 to wait until Server 1 completely finishes
     permissions:
-      contents: read
       packages: write
 
     steps:
-      # ── Maximize Build Space ──
       - name: Maximize Build Space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -33,75 +97,17 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      # ── Checkout ──
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # ── Docker Buildx ──
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # ── Log in to GHCR ──
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # ── Build Local Sandbox Image ──
-      - name: Build container image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: false
-          load: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # ── Post-Build Verification Gate (Safe for CPU execution) ──
-      - name: Verify installed packages
-        run: |
-          echo "Running structural dependency tests inside the container..."
-          docker run --rm \
-            -v ${{ github.workspace }}/scripts:/mnt/scripts:ro \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify \
-            python3 /mnt/scripts/verify_container.py
-
-      # ── Push to GHCR ──
-      - name: Tag and push verified image
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$SHORT_SHA
-
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$SHORT_SHA
-          echo "✅ Pushed verified Docker image layers."
-
-      # ── CRITICAL: Free Local Storage to Avoid Crash ──
-      - name: Prune local Docker assets to free space
-        run: |
-          docker rmi ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:verify
-          docker system prune -a -f
-
-      # ── Setup Apptainer ──
       - name: Setup Apptainer
         uses: eWaterCycle/setup-apptainer@v2
         with:
           apptainer-version: 1.3.1
 
-      # ── Build SIF via Streaming Registry (Saves ~15GB Space) ──
       - name: Build SIF from remote GHCR image
         run: |
-          echo "Building Apptainer SIF by streaming from remote registry..."
-          # Using docker:// instead of docker-daemon:// streams layer extraction, keeping disk usage minimal
+          echo "Building SIF on a clean disk from the newly pushed Docker image..."
+          # Server 2 has 100% of its disk free, easily accommodating the layer extraction
           apptainer build deepstream_custom.sif docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-      # ── Push SIF to GHCR ──
       - name: Push SIF to GHCR (ORAS)
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | apptainer registry login -u ${{ github.actor }} --password-stdin oras://${{ env.REGISTRY }}
@@ -109,19 +115,4 @@ jobs:
 
           apptainer push deepstream_custom.sif oras://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-sif:latest
           apptainer push deepstream_custom.sif oras://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-sif:$SHORT_SHA
-          echo "✅ Pushed SIF to registry."
-
-      # ── Summary ──
-      - name: Post summary
-        if: always()
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "### 🐳 DeepStream Container Build" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Base | \`deepstream:9.0-samples-multiarch\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Docker Image | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Apptainer SIF | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-sif\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tags | \`:latest\`, \`:$SHORT_SHA\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "✅ SIF packed and pushed safely from Server 2."
