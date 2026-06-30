@@ -12,7 +12,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y python3-pip python3-dev && \
     /opt/nvidia/deepstream/deepstream/user_additional_install.sh && \
-   pip3 install /opt/nvidia/deepstream/deepstream/service-maker/python/pyservicemaker*.whl opencv-python-headless numpy PyYAML --break-system-packages
-    pip3 install torch --break-system-packages && \
+    pip3 install /opt/nvidia/deepstream/deepstream/service-maker/python/pyservicemaker*.whl opencv-python-headless numpy torch PyYAML --break-system-packages && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
